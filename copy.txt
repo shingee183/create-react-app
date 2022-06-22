@@ -1,0 +1,443 @@
+App.js
+import "./App.css";
+import React from "react";
+import AuthView from "./views/AuthView";
+
+export default function App() {
+  return (
+    <>
+      <AuthView />
+    </>
+  );
+}
+AuthView.js
+Auth process 관련 함수를 정의하고, Authenticator 를 사용해서 UI를 구현했다.
+Authenticator를 사용하면 바로 로그인 UI가 구현된다.
+하지만, 백엔드 코드가 작성되어 있지 않아서 제대로 동작하지 않는다. 위에서 로그인 관련 함수를 작성해둬야 한다. 이 함수들은 공식 문서에 코드가 나와 있으며, 자신의 user pool에 맞춰서 변경하면 된다.
+return에서 main 코드 안에는 로그인 후에 볼 수 있는 화면을 설정한다.
+
+import React from "react";
+import Amplify, { Auth } from "aws-amplify";
+import { Authenticator, Button } from "@aws-amplify/ui-react";
+import "@aws-amplify/ui-react/styles.css";
+
+import components from "../theme/components";
+import formFields from "../theme/formFields";
+
+import awsconfig from "../auth/awsconfig";
+Amplify.configure(awsconfig);
+
+export default class AuthView extends React.Component {
+  constructor() {
+    super();
+    this.state = {
+      username: "",
+      email: "",
+      password: "",
+      new_password: "",
+      code: "",
+      stage: "SIGNIN",
+      cognito_username: "",
+    };
+  }
+  componentDidMount() {
+    Auth.currentAuthenticatedUser()
+      .then((user) => {
+        console.log(user);
+        this.setState({ stage: "SIGNEDIN", cognito_username: user.username });
+        // console.log(user.signInUserSession.accessToken.jwtToken);
+      })
+      .catch(() => {
+        console.log("Not signed in");
+      });
+  }
+  signUp = async () => {
+    let self = this;
+    try {
+      const user = await Auth.signUp({
+        username: self.state.email,
+        password: self.state.password,
+        attributes: {
+          email: self.state.email, // optional
+          name: self.state.username,
+        },
+      });
+      self.setState({ stage: "VERIFYING" });
+    } catch (error) {
+      console.log("error signing up:", error);
+    }
+  };
+  signOut = async () => {
+    try {
+      await Auth.signOut();
+      window.location.href = "/";
+    } catch (error) {
+      console.log("error signing out: ", error);
+    }
+  };
+  signIn = async () => {
+    let self = this;
+    try {
+      const user = await Auth.signIn({
+        username: self.state.email,
+        password: self.state.password,
+      });
+      this.setState({ stage: "SIGNEDIN", cognito_username: user.username });
+    } catch (error) {
+      console.log("error signing in", error);
+      if (error.code === "UserNotConfirmedException") {
+        await Auth.resendSignUp(self.state.email);
+        this.setState({ stage: "VERIFYING" });
+      }
+    }
+  };
+
+  confirm = async () => {
+    let self = this;
+    console.log(self.state.code);
+    let username = self.state.email;
+    let code = self.state.code;
+    try {
+      await Auth.confirmSignUp(username, code);
+      //바로로그인?
+      this.signIn();
+    } catch (error) {
+      console.log("error confirming sign up", error);
+    }
+  };
+  changePassword = async () => {
+    let self = this;
+    Auth.currentAuthenticatedUser()
+      .then((user) => {
+        return Auth.changePassword(
+          user,
+          self.state.password,
+          self.state.new_password
+        );
+      })
+      .then((data) => console.log(data))
+      .catch((error) => console.log(error));
+  };
+  changePasswordForgot = async () => {
+    let self = this;
+    Auth.forgotPasswordSubmit(
+      self.state.email,
+      self.state.code,
+      self.state.new_password
+    )
+      .then((data) => {
+        console.log("SUCCESS");
+      })
+      .catch((error) => {
+        console.log("err", error);
+      });
+  };
+  resendCode = async () => {
+    let self = this;
+    try {
+      await Auth.resendSignUp(self.state.email);
+      console.log("code resent succesfully");
+    } catch (error) {
+      console.log("error resending code: ", error);
+    }
+  };
+  sendCode = async () => {
+    let self = this;
+    Auth.forgotPassword(self.state.email)
+      .then((data) => {
+        console.log(data);
+      })
+      .catch((error) => console.log(error));
+  };
+
+  render() {
+    return (
+      <Authenticator
+        loginMechanisms={["email"]}
+        variation="modal"
+        formFields={formFields}
+        components={components}
+      >
+        {({ signOut, user }) => (
+          <main>
+            <h1>Hello {user.username}</h1>
+            <Button onClick={signOut}>Sign out</Button>
+          </main>
+        )}
+      </Authenticator>
+    );
+  }
+}
+여기 코드를 보면 formFields와 components를 정의해두었다. 이 옵션은 필수는 아니고 UI를 커스텀한 것이다. 공식 문서를 참조하면 된다.한 파일 안에 작성해도 되지만 길어져서 분리해서 두었다.
+
+<Authenticator
+        loginMechanisms={["email"]}
+        variation="modal"
+        formFields={formFields}
+        components={components}
+>
+components.js
+components는 로그인 화면의 전체적인 배치를 custom 할 수 있게 한다. Header, Footer 등을 정의할 수 있다.
+
+import {
+  useAuthenticator,
+  useTheme,
+  View,
+  Image,
+  Text,
+  Heading,
+  Button,
+} from "@aws-amplify/ui-react";
+
+import logo from "../assets/images/_logo_white.png";
+
+const components = {
+  Header() {
+    const { tokens } = useTheme();
+
+    return (
+      <View textAlign="center" padding={tokens.space.large}>
+        <Image alt="Amplify logo" src={logo} />
+      </View>
+    );
+  },
+
+  Footer() {
+    const { tokens } = useTheme();
+
+    return (
+      <View textAlign="center" padding={tokens.space.large}>
+        <Text color={`${tokens.colors.neutral["80"]}`}>
+          &copy; All Rights Reserved
+        </Text>
+      </View>
+    );
+  },
+
+  SignIn: {
+    Header() {
+      const { tokens } = useTheme();
+
+      return (
+        <Heading
+          padding={`${tokens.space.xl} 0 0 ${tokens.space.xl}`}
+          level={3}
+        >
+          Sign in to your account
+        </Heading>
+      );
+    },
+    Footer() {
+      const { toResetPassword } = useAuthenticator();
+
+      return (
+        <View textAlign="center">
+          <Button
+            fontWeight="normal"
+            onClick={toResetPassword}
+            size="small"
+            variation="link"
+          >
+            Reset Password
+          </Button>
+        </View>
+      );
+    },
+  },
+
+  SignUp: {
+    Header() {
+      const { tokens } = useTheme();
+
+      return (
+        <Heading
+          padding={`${tokens.space.xl} 0 0 ${tokens.space.xl}`}
+          level={3}
+        >
+          Create a new account
+        </Heading>
+      );
+    },
+    Footer() {
+      const { toSignIn } = useAuthenticator();
+
+      return (
+        <View textAlign="center">
+          <Button
+            fontWeight="normal"
+            onClick={toSignIn}
+            size="small"
+            variation="link"
+          >
+            Back to Sign In
+          </Button>
+        </View>
+      );
+    },
+  },
+  ConfirmSignUp: {
+    Header() {
+      const { tokens } = useTheme();
+      return (
+        <Heading
+          padding={`${tokens.space.xl} 0 0 ${tokens.space.xl}`}
+          level={3}
+        >
+          Enter Information:
+        </Heading>
+      );
+    },
+    Footer() {
+      return <Text>Footer Information</Text>;
+    },
+  },
+  SetupTOTP: {
+    Header() {
+      const { tokens } = useTheme();
+      return (
+        <Heading
+          padding={`${tokens.space.xl} 0 0 ${tokens.space.xl}`}
+          level={3}
+        >
+          Enter Information:
+        </Heading>
+      );
+    },
+    Footer() {
+      return <Text>Footer Information</Text>;
+    },
+  },
+  ConfirmSignIn: {
+    Header() {
+      const { tokens } = useTheme();
+      return (
+        <Heading
+          padding={`${tokens.space.xl} 0 0 ${tokens.space.xl}`}
+          level={3}
+        >
+          Enter Information:
+        </Heading>
+      );
+    },
+    Footer() {
+      return <Text>Footer Information</Text>;
+    },
+  },
+  ResetPassword: {
+    Header() {
+      const { tokens } = useTheme();
+      return (
+        <Heading
+          padding={`${tokens.space.xl} 0 0 ${tokens.space.xl}`}
+          level={3}
+        >
+          Enter Information:
+        </Heading>
+      );
+    },
+    Footer() {
+      return <Text>Footer Information</Text>;
+    },
+  },
+  ConfirmResetPassword: {
+    Header() {
+      const { tokens } = useTheme();
+      return (
+        <Heading
+          padding={`${tokens.space.xl} 0 0 ${tokens.space.xl}`}
+          level={3}
+        >
+          Enter Information:
+        </Heading>
+      );
+    },
+    Footer() {
+      return <Text>Footer Information</Text>;
+    },
+  },
+};
+
+export default components;
+formFields.js
+formFiels는 각 화면에서 textfield 같은 부분을 커스텀 할 수 있는데, label이나 placeholder 등을 설정할 수 있다.
+
+const formFields = {
+  signIn: {
+    username: {
+      labelHidden: false,
+      placeholder: "Enter your email",
+    },
+  },
+  signUp: {
+    email: {
+      // label: "Email",
+      // labelHidden: false,
+      placeholder: "Enter your email",
+      order: 1,
+    },
+    name: {
+      // label: "Username:",
+      // labelHidden: false,
+      placeholder: "Enter your name",
+      order: 2,
+    },
+    password: {
+      // labelHidden: false,
+      // label: "Password:",
+      placeholder: "Enter your Password:",
+      isRequired: false,
+      order: 3,
+    },
+    confirm_password: {
+      // labelHidden: false,
+      // label: "Confirm Password:",
+      order: 4,
+    },
+  },
+  forceNewPassword: {
+    password: {
+      labelHidden: false,
+      placeholder: "Enter your Password:",
+    },
+  },
+  resetPassword: {
+    username: {
+      labelHidden: false,
+      placeholder: "Enter your email:",
+    },
+  },
+  confirmResetPassword: {
+    confirmation_code: {
+      labelHidden: false,
+      placeholder: "Enter your Confirmation Code:",
+      label: "New Label",
+      isRequired: false,
+    },
+    confirm_password: {
+      labelHidden: false,
+      placeholder: "Enter your Password Please:",
+    },
+  },
+  setupTOTP: {
+    QR: {
+      totpIssuer: "test issuer",
+      totpUsername: "amplify_qr_test_user",
+    },
+    confirmation_code: {
+      labelHidden: false,
+      label: "New Label",
+      placeholder: "Enter your Confirmation Code:",
+      isRequired: false,
+    },
+  },
+  confirmSignIn: {
+    confirmation_code: {
+      labelHidden: false,
+      label: "New Label",
+      placeholder: "Enter your Confirmation Code:",
+      isRequired: false,
+    },
+  },
+};
+
+export default formFields;
